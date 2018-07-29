@@ -10,6 +10,8 @@ contract bigBankLittleBank is DefconPro {
     uint public houseCommission = 0; //keeps track of commission
     uint public bookKeeper = 0; //keeping track of what the balance should be to tie into auto pause script if it doesn't match contracte balance
     
+    bytes32 emptyBet = 0x0000000000000000000000000000000000000000000000000000000000000000;
+    
     //main event, listing off winners/losers
     event BigBankBet(uint blockNumber, address indexed winner, address indexed loser, uint winningBetId1, uint losingBetId2, uint total);
     //event to show users deposit history
@@ -20,13 +22,13 @@ contract bigBankLittleBank is DefconPro {
     //Private struct that keeps track of each users bet
     BetBank[] private betBanks;
     
-    //Listing Struct
+    //bet Struct
     struct BetBank {
-        uint bet;
+        bytes32 bet;
         address owner;
     }
-    
-    //gets the user balance, requires that the user be the msg.sender, should obscure the users balance
+ 
+    //gets the user balance, requires that the user be the msg.sender, should make it a bit harder to get users balance
     function userBalance() public view returns(uint) {
         return userBank[msg.sender];
     }
@@ -58,9 +60,12 @@ contract bigBankLittleBank is DefconPro {
     //create a bet
     function startBet(uint _bet) public defcon3 returns(uint betId) {
         require(userBank[msg.sender] >= _bet);//require user has enough to create the bet
+        require(_bet > 0);
         userBank[msg.sender] = (userBank[msg.sender]).sub(_bet);//reduce users bank by the bet amount
+        uint convertedAddr = uint(msg.sender);
+        uint combinedBet = convertedAddr.add(_bet)*7;
         BetBank memory betBank = BetBank({//birth the bet token
-            bet: _bet,
+            bet: bytes32(combinedBet),//_bet,
             owner: msg.sender
         });
         //push new bet and get betId
@@ -74,15 +79,22 @@ contract bigBankLittleBank is DefconPro {
     
     //bet a users token against another users token
     function betAgainstUser(uint _betId1, uint _betId2) public defcon3 returns(bool){
-        require(betBanks[_betId1].bet > 0 && betBanks[_betId2].bet > 0);//require that both tokens are active and hold funds
+        require(betBanks[_betId1].bet != emptyBet && betBanks[_betId2].bet != emptyBet);//require that both tokens are active and hold funds
         require(betBanks[_betId1].owner == msg.sender || betBanks[_betId2].owner == msg.sender); //require that the user submitting is the owner of one of the tokens
         require(betBanks[_betId1].owner != betBanks[_betId2].owner);//prevent a user from betting 2 tokens he owns, prevent possible exploits
         require(_betId1 != _betId2);//require that user doesn't bet token against itself
-        uint take = (betBanks[_betId1].bet).add(betBanks[_betId2].bet);//calculate the total rewards for winning
+    
+        //unhash the bets to calculate winner
+        uint bet1ConvertedAddr = uint(betBanks[_betId1].owner);
+        uint bet1 = (uint(betBanks[_betId1].bet)/1254).sub(bet1ConvertedAddr);
+        uint bet2ConvertedAddr = uint(betBanks[_betId2].owner);
+        uint bet2 = (uint(betBanks[_betId2].bet)/1254).sub(bet2ConvertedAddr);  
+        
+        uint take = (bet1).add(bet2);//calculate the total rewards for winning
         uint fee = (take.mul(houseFee)).div(100);//calculate the fee
         houseCommission = houseCommission.add(fee);//add fee to commission
-        if(betBanks[_betId1].bet != betBanks[_betId2].bet) {//if no tie
-            if(betBanks[_betId1].bet > betBanks[_betId2].bet) {//if betId1 wins
+        if(bet1 != bet2) {//if no tie
+            if(bet1 > bet2) {//if betId1 wins
                 _payoutWinner(_betId1, _betId2, take, fee);//payout betId1
             } else {
                 _payoutWinner(_betId2, _betId1, take, fee);//payout betId2
@@ -133,7 +145,7 @@ contract bigBankLittleBank is DefconPro {
     function _totalActiveBets() private view returns(uint total) {
         total = 0;
         for(uint i=0; i<betBanks.length; i++) {//loop through bets 
-            if(betBanks[i].bet > 0 && betBanks[i].owner != msg.sender) {//if there is a bet and the owner is not the msg.sender
+            if(betBanks[i].bet != emptyBet && betBanks[i].owner != msg.sender) {//if there is a bet and the owner is not the msg.sender
                 total++;//increase quantity
             }
         }
@@ -148,7 +160,7 @@ contract bigBankLittleBank is DefconPro {
             uint256[] memory result = new uint256[](total);
             uint rc = 0;
             for (uint idx=0; idx < betBanks.length; idx++) {//loop through bets
-                if(betBanks[idx].bet > 0 && betBanks[idx].owner != msg.sender) {//if there is a bet and the owner is not the msg.sender
+                if(betBanks[idx].bet != emptyBet && betBanks[idx].owner != msg.sender) {//if there is a bet and the owner is not the msg.sender
                     result[rc] = idx;//add token to list
                     rc++;
                 }
@@ -161,7 +173,7 @@ contract bigBankLittleBank is DefconPro {
     function _totalUsersBets() private view returns(uint total) {
         total = 0;
         for(uint i=0; i<betBanks.length; i++) {//loop through bets
-            if(betBanks[i].owner == msg.sender && betBanks[i].bet > 0) {//if the bet is over 0 and the owner is msg.sender
+            if(betBanks[i].owner == msg.sender && betBanks[i].bet != emptyBet) {//if the bet is over 0 and the owner is msg.sender
                 total++;//increase quantity
             }
         }
@@ -176,7 +188,7 @@ contract bigBankLittleBank is DefconPro {
             uint256[] memory result = new uint256[](total);
             uint rc = 0;
             for (uint idx=0; idx < betBanks.length; idx++) {//loop through bets
-                if(betBanks[idx].owner == msg.sender && betBanks[idx].bet > 0) {//if the bet is over 0 and owner is msg.sender
+                if(betBanks[idx].owner == msg.sender && betBanks[idx].bet != emptyBet) {//if the bet is over 0 and owner is msg.sender
                     result[rc] = idx;//add to list
                     rc++;
                 }
